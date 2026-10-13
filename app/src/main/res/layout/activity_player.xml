@@ -20,6 +20,57 @@
         android:visibility="gone"
         android:background="@android:color/black" />
 
+    <!-- 切台时的频道提示条 -->
+    <TextView
+        android:id="@+id/channelBanner"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="24dp"
+        android:background="#CC000000"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:visibility="gone" />
+
+    <!-- 左侧频道面板：遥控器 OK/菜单键、手机点按呼出 -->
+    <LinearLayout
+        android:id="@+id/channelPanel"
+        android:layout_width="340dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="#E6000000"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:focusable="false"
+            android:padding="16dp"
+            android:text="频道列表"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#33FFFFFF" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/panelList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:focusable="true"
+            android:paddingBottom="16dp" />
+    </LinearLayout>
+
     <ProgressBar
         android:id="@+id/pageLoading"
         android:layout_width="wrap_content"
