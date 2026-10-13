@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">zoe-iptv</string>
+    <string name="settings_title">播放列表设置</string>
+    <string name="playlist_url_hint">m3u 播放列表地址（http… / file…），留空用内置示例</string>
+    <string name="save">保存</string>
+    <string name="reset_default">恢复内置示例</string>
+    <string name="saved">已保存，返回重新加载</string>
+    <string name="loading">正在加载播放列表…</string>
+    <string name="empty_list">播放列表为空，请检查地址或恢复内置示例</string>
+    <string name="load_failed">加载失败：%1$s</string>
+    <string name="menu_settings">设置播放列表</string>
+    <string name="menu_reload">重新加载</string>
+</resources>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 频道卡片：TV 端靠焦点高亮，手机端靠点击；同一套布局 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="72dp"
+    android:layout_margin="6dp"
+    android:background="@drawable/bg_channel_card"
+    android:clickable="true"
+    android:focusable="true">
+
+    <TextView
+        android:id="@+id/channelName"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:textColor="@color/text_primary"
+        android:textSize="18sp"
+        android:singleLine="true"
+        android:ellipsize="end" />
+</FrameLayout>
