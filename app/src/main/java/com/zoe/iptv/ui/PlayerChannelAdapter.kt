@@ -7,6 +7,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
+import coil.transform.CircleCropTransformation
 import com.zoe.iptv.R
 import com.zoe.iptv.data.PanelItem
 
@@ -68,6 +69,7 @@ class PlayerChannelAdapter(
     }
 
     class EntryVH(v: View, onPick: (Int) -> Unit) : RecyclerView.ViewHolder(v) {
+        private val bar: View = v.findViewById(R.id.selectedBar)
         private val logo: ImageView = v.findViewById(R.id.channelLogo)
         private val num: TextView = v.findViewById(R.id.channelNum)
         private val name: TextView = v.findViewById(R.id.channelName)
@@ -87,9 +89,13 @@ class PlayerChannelAdapter(
             num.setTextColor(color)
             name.setTextColor(color)
             name.paint.isFakeBoldText = isSel
-            // 台标：有 tvg-logo 才加载，没有就清空（防止复用错乱）
+            bar.visibility = if (isSel) View.VISIBLE else View.INVISIBLE
+            // 台标：圆形裁剪，有 tvg-logo 才加载，没有就清空（防止复用错乱）
             if (entry.channel.logo.isNotBlank()) {
-                logo.load(entry.channel.logo)
+                logo.load(entry.channel.logo) {
+                    crossfade(true)
+                    transformations(CircleCropTransformation())
+                }
             } else {
                 logo.setImageDrawable(null)
             }

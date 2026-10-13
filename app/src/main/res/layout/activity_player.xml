@@ -12,46 +12,51 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 切台时的频道提示条 -->
+    <!-- 切台时的频道提示条：底部居中，半透明圆角 -->
     <TextView
         android:id="@+id/channelBanner"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="24dp"
-        android:background="#CC000000"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
-        android:paddingTop="10dp"
-        android:paddingBottom="10dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="56dp"
+        android:background="@drawable/bg_banner"
+        android:paddingStart="22dp"
+        android:paddingEnd="22dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
         android:textColor="#FFFFFF"
-        android:textSize="18sp"
+        android:textSize="17sp"
         android:visibility="gone" />
 
-    <!-- 左侧频道面板：遥控器 OK/菜单键、手机点按呼出 -->
+    <!-- 左侧频道面板：遥控器 OK 键、手机点按呼出 -->
     <LinearLayout
         android:id="@+id/channelPanel"
         android:layout_width="340dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:background="#E6000000"
+        android:background="@drawable/bg_panel"
         android:orientation="vertical"
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/panelTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:focusable="false"
-            android:padding="16dp"
+            android:paddingStart="20dp"
+            android:paddingTop="18dp"
+            android:paddingBottom="14dp"
             android:text="频道列表"
             android:textColor="#FFFFFF"
-            android:textSize="18sp"
+            android:textSize="19sp"
             android:textStyle="bold" />
 
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="#33FFFFFF" />
+            android:layout_marginStart="20dp"
+            android:layout_marginEnd="20dp"
+            android:background="#22FFFFFF" />
 
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/panelList"
@@ -60,13 +65,32 @@
             android:layout_weight="1"
             android:clipToPadding="false"
             android:focusable="true"
+            android:paddingTop="8dp"
             android:paddingBottom="16dp" />
     </LinearLayout>
 
-    <ProgressBar
-        android:id="@+id/pageLoading"
+    <!-- 页面加载指示 -->
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:visibility="gone" />
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <ProgressBar
+            android:id="@+id/pageLoading"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/loadingText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="正在加载…"
+            android:textColor="#99FFFFFF"
+            android:textSize="14sp"
+            android:visibility="gone" />
+    </LinearLayout>
 </FrameLayout>

@@ -118,11 +118,11 @@ class PlayerActivity : AppCompatActivity() {
         // 加载进度条
         s.setProgressDelegate(object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
-                binding.pageLoading.visibility = View.VISIBLE
+                setLoading(true)
             }
 
             override fun onPageStop(session: GeckoSession, success: Boolean) {
-                binding.pageLoading.visibility = View.GONE
+                setLoading(false)
             }
         })
 
@@ -153,7 +153,12 @@ class PlayerActivity : AppCompatActivity() {
         binding.channelPanel.visibility == View.VISIBLE
 
     private fun showPanel() {
+        binding.channelPanel.animate().cancel()
         binding.channelPanel.visibility = View.VISIBLE
+        // 从左侧滑入
+        val w = binding.channelPanel.width.toFloat()
+        binding.channelPanel.translationX = if (w > 0) -w else -dp(340)
+        binding.channelPanel.animate().translationX(0f).setDuration(220).start()
         panelAdapter.selectedIndex = index
         val pp = panelAdapter.panelPositionOf(index)
         if (pp != -1) {
@@ -167,8 +172,25 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun hidePanel() {
-        binding.channelPanel.visibility = View.GONE
+        binding.channelPanel.animate().cancel()
+        val w = binding.channelPanel.width.toFloat()
+        val off = if (w > 0) -w else -dp(340)
+        binding.channelPanel.animate().translationX(off).setDuration(200)
+            .withEndAction {
+                binding.channelPanel.visibility = View.GONE
+                binding.channelPanel.translationX = 0f
+            }.start()
         hideSystemUi()
+    }
+
+    private fun dp(v: Int): Float =
+        v * resources.displayMetrics.density
+
+    /** 加载指示：菊花 + 文字联动 */
+    private fun setLoading(show: Boolean) {
+        val vis = if (show) View.VISIBLE else View.GONE
+        binding.pageLoading.visibility = vis
+        binding.loadingText.visibility = vis
     }
 
     private fun togglePanel() {
@@ -215,7 +237,7 @@ class PlayerActivity : AppCompatActivity() {
     private fun loadPlaylist() {
         if (loading) return
         loading = true
-        binding.pageLoading.visibility = View.VISIBLE
+        setLoading(true)
         ioScope.launch {
             val list = try {
                 val url = prefs.playlistUrl
@@ -233,11 +255,12 @@ class PlayerActivity : AppCompatActivity() {
                 loading = false
                 PlaylistHolder.channels = list
                 if (list.isEmpty()) {
-                    binding.pageLoading.visibility = View.GONE
+                    setLoading(false)
                     showBanner("播放列表为空，长按屏幕去设置里配置直播源")
                     return@withContext
                 }
                 panelAdapter.items = PlaylistGrouper.group(list)
+                binding.panelTitle.text = "频道列表 · ${list.size}"
                 playAt(prefs.lastIndex.coerceIn(list.indices))
             }
         }
@@ -254,15 +277,25 @@ class PlayerActivity : AppCompatActivity() {
         val pp = panelAdapter.panelPositionOf(index)
         if (pp != -1) binding.panelList.scrollToPosition(pp)
         showBanner("%03d · %s".format(index + 1, ch.name))
-        binding.pageLoading.visibility = View.VISIBLE
+        setLoading(true)
         session?.loadUri(ch.url)
     }
 
+    /** 底部半透明圆角提示条：淡入，2.5 秒后淡出 */
     private fun showBanner(text: String) {
+        binding.channelBanner.animate().cancel()
         binding.channelBanner.text = text
         binding.channelBanner.visibility = View.VISIBLE
+        binding.channelBanner.alpha = 0f
+        binding.channelBanner.animate().alpha(1f).setDuration(150).start()
         bannerHide?.let { uiHandler.removeCallbacks(it) }
-        bannerHide = Runnable { binding.channelBanner.visibility = View.GONE }
+        bannerHide = Runnable {
+            binding.channelBanner.animate().alpha(0f).setDuration(300)
+                .withEndAction {
+                    binding.channelBanner.visibility = View.GONE
+                    binding.channelBanner.alpha = 1f
+                }.start()
+        }
         uiHandler.postDelayed(bannerHide!!, 2500)
     }
 

@@ -12,8 +12,8 @@ android {
         applicationId = "com.zoe.iptv"
         minSdk = 26          // GeckoView 158 要求 minSdk >= 26（Android 8.0）
         targetSdk = 34
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "2.1"
         // GeckoView 只保留 arm 双 ABI（砍掉 x86_64 省体积）
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -21,6 +21,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // debug 包不需要剥离 .so 调试符号：省磁盘、省时间（2G 小内存机器上 strip 会爆磁盘）
+            packagingOptions {
+                doNotStrip("**/*.so")
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
