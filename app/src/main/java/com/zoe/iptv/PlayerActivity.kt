@@ -1,54 +1,63 @@
 package com.zoe.iptv
 
-import android.annotation.SuppressLint
-import android.graphics.Bitmap
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.zoe.iptv.data.PlaylistGrouper
 import com.zoe.iptv.data.PlaylistHolder
+import com.zoe.iptv.data.PlaylistParser
+import com.zoe.iptv.data.Prefs
 import com.zoe.iptv.databinding.ActivityPlayerBinding
 import com.zoe.iptv.ui.PlayerChannelAdapter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.mozilla.geckoview.GeckoResult
+import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.GeckoSessionSettings
+import java.net.URL
 import kotlin.math.abs
 
 /**
- * 横屏全屏网页播放器（电视 + 手机）。
+ * 主界面：横屏全屏播放器（电视 + 手机），打开 App 直接进入。
  *
- * 原理：m3u 里的地址是网页（如央视频 tv/home），直接用全屏 WebView 打开，
- * 由网页自己的播放器（JS/WASM 解密 + MSE）完成播放，App 只负责：
- *  1. 页面加载后注入 JS：自动播放、点全屏按钮、兜底把 <video> 铺满视口；
- *  2. WebChromeClient.onShowCustomView 接管 HTML5 全屏视频；
+ * 播放内核是打包进 APK 的火狐 GeckoView（不依赖系统 WebView，
+ * 各设备体验一致），m3u 里的网页地址由 GeckoView 打开，
+ * 网页自己的播放器（JS/WASM 解密 + MSE）完成播放。App 只负责：
+ *  1. 内置扩展（assets/zoeext）：页面里自动播放 <video> 并全屏；
+ *  2. PermissionDelegate 放行自动播放；
  *  3. 切台：遥控器上下键 / 频道键、手机屏幕上下滑动；
- *  4. 频道面板：遥控器 OK/菜单键、手机点按呼出，电视端焦点导航。
- *
- * 内核是系统 WebView（Chromium/Chrome 内核），随系统更新，
- * 不占 APK 体积，电视盒子视频兼容性最好。
+ *  4. 频道面板：分组 + 台标 + 编号，遥控器 OK/菜单键、手机点按呼出，
+ *     长按屏幕进设置配直播源。
  */
 class PlayerActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityPlayerBinding
     private lateinit var panelAdapter: PlayerChannelAdapter
+    private lateinit var prefs: Prefs
     private lateinit var gestures: GestureDetector
-    private var chromeClient: WebChromeClient? = null
+
+    private var runtime: GeckoRuntime? = null
+    private var session: GeckoSession? = null
 
     private var index: Int = 0
-    private var customView: View? = null
-    private var customViewCallback: WebChromeClient.CustomViewCallback? = null
-
+    private var loading: Boolean = false
     private val uiHandler = Handler(Looper.getMainLooper())
     private var bannerHide: Runnable? = null
+    private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,201 +66,103 @@ class PlayerActivity : AppCompatActivity() {
 
         hideSystemUi()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        prefs = Prefs(this)
 
-        index = intent.getIntExtra(EXTRA_INDEX, 0)
-
-        // 左侧频道面板
-        panelAdapter = PlayerChannelAdapter { pos ->
-            hidePanel()
-            playAt(pos)
-        }
-        binding.panelList.layoutManager = LinearLayoutManager(this)
-        binding.panelList.adapter = panelAdapter
-        panelAdapter.channels = PlaylistHolder.channels
-        panelAdapter.selected = index
-
-        // 手机端手势：点按呼出/收起面板，上下滑动切台。
-        // OnTouchListener 返回 false，不吞事件，WebView 照常响应触控。
-        gestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                togglePanel()
-                return true
-            }
-
-            override fun onFling(
-                e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
-            ): Boolean {
-                if (e1 == null) return false
-                val dx = e2.x - e1.x
-                val dy = e2.y - e1.y
-                if (abs(dy) > abs(dx) && abs(dy) > 120 && abs(vy) > 200) {
-                    if (binding.channelPanel.visibility == View.VISIBLE) hidePanel()
-                    if (dy < 0) playAt(index + 1) else playAt(index - 1) // 上滑下一个，下滑上一个
-                    return true
-                }
-                return false
-            }
-        })
-        binding.webView.setOnTouchListener { _, ev ->
-            gestures.onTouchEvent(ev)
-            false
-        }
-
-        setupWebView()
-        playAt(index)
+        setupGeckoView()
+        setupPanel()
+        setupGestures()
+        loadPlaylist()
     }
 
-    // ---------- WebView 设置 ----------
+    // ---------- GeckoView ----------
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun setupWebView() {
-        val wv: WebView = binding.webView
-        val s: WebSettings = wv.settings
-        s.javaScriptEnabled = true
-        s.domStorageEnabled = true
-        s.mediaPlaybackRequiresUserGesture = false // 允许 JS 自动播放
-        s.loadWithOverviewMode = true
-        s.useWideViewPort = true
-        s.builtInZoomControls = false
-        s.displayZoomControls = false
-        s.cacheMode = WebSettings.LOAD_DEFAULT
-        // 桌面版 Chrome UA：央视频 tv/home 是桌面页面，移动 UA 可能拿不到播放器
-        s.userAgentString =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Chrome/126.0.0.0 Safari/537.36"
-        wv.setBackgroundColor(0xFF000000.toInt())
+    private fun setupGeckoView() {
+        // 桌面 UA 模式：央视频 tv/home 是桌面页面
+        val settings = GeckoSessionSettings.Builder()
+            .userAgentMode(GeckoSessionSettings.USER_AGENT_MODE_DESKTOP)
+            .build()
+        val rt = GeckoRuntime.create(this)
+        runtime = rt
+        val s = GeckoSession(settings)
 
-        wv.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView, request: WebResourceRequest
-            ): Boolean {
-                // 所有跳转都留在 WebView 内，不抛给外部浏览器
-                return false
+        // 自动播放放行（有声 / 无声都允许）
+        s.setPermissionDelegate(object : GeckoSession.PermissionDelegate {
+            override fun onContentPermissionRequest(
+                session: GeckoSession,
+                perm: GeckoSession.PermissionDelegate.ContentPermission
+            ): GeckoResult<Int>? {
+                val p = perm.permission
+                return if (p == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE ||
+                    p == GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE
+                ) {
+                    GeckoResult.fromValue(
+                        GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+                    )
+                } else {
+                    GeckoResult.fromValue(
+                        GeckoSession.PermissionDelegate.ContentPermission.VALUE_PROMPT
+                    )
+                }
             }
+        })
 
-            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+        // 全屏回调：进入全屏时关掉频道面板，避免遮挡
+        s.setContentDelegate(object : GeckoSession.ContentDelegate {
+            override fun onFullScreen(session: GeckoSession, fullScreen: Boolean) {
+                if (fullScreen && isPanelOpen()) {
+                    hidePanel()
+                }
+            }
+        })
+
+        // 加载进度条
+        s.setProgressDelegate(object : GeckoSession.ProgressDelegate {
+            override fun onPageStart(session: GeckoSession, url: String) {
                 binding.pageLoading.visibility = View.VISIBLE
             }
 
-            override fun onPageFinished(view: WebView, url: String) {
+            override fun onPageStop(session: GeckoSession, success: Boolean) {
                 binding.pageLoading.visibility = View.GONE
-                injectAutoPlay(view)
             }
+        })
+
+        // 内置扩展：页面内自动播放 + 全屏
+        try {
+            rt.webExtensionController.installBuiltIn("resource://android/assets/zoeext/")
+        } catch (e: Exception) {
+            Log.w(TAG, "installBuiltIn failed", e)
         }
 
-        chromeClient = object : WebChromeClient() {
-            // 网页 <video> 请求全屏时回调：把 video 视图搬到全屏容器
-            override fun onShowCustomView(view: View, callback: CustomViewCallback) {
-                if (customView != null) {
-                    callback.onCustomViewHidden()
-                    return
-                }
-                customView = view
-                customViewCallback = callback
-                binding.webView.visibility = View.GONE
-                binding.customViewContainer.visibility = View.VISIBLE
-                binding.customViewContainer.addView(
-                    view,
-                    FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                    )
-                )
-                hideSystemUi()
-            }
-
-            override fun onHideCustomView() {
-                customView?.let { binding.customViewContainer.removeView(it) }
-                customView = null
-                customViewCallback = null
-                binding.customViewContainer.visibility = View.GONE
-                binding.webView.visibility = View.VISIBLE
-                hideSystemUi()
-            }
-        }
-        wv.webChromeClient = chromeClient
-    }
-
-    // ---------- 播放控制 ----------
-
-    private fun playAt(i: Int) {
-        val list = PlaylistHolder.channels
-        if (list.isEmpty()) {
-            finish()
-            return
-        }
-        // 切台前先退出可能存在的网页全屏态
-        if (customView != null) chromeClient?.onHideCustomView()
-        index = (i + list.size) % list.size
-        val ch = list[index]
-        title = ch.name
-        panelAdapter.selected = index
-        binding.panelList.scrollToPosition(index)
-        showBanner("%03d · %s".format(index + 1, ch.name))
-        binding.pageLoading.visibility = View.VISIBLE
-        binding.webView.loadUrl(ch.url)
-    }
-
-    /**
-     * 页面加载后注入 JS：找 <video> 自动播放并全屏。
-     * 策略（按顺序，哪个成用哪个）：
-     *  1. 调 requestFullscreen（走 onShowCustomView 全屏容器）；
-     *  2. 点页面自带的全屏按钮；
-     *  3. 兜底：直接把 video 元素 position:fixed 铺满视口。
-     * video 可能是懒加载的，每 1.5s 重试一次，最多 40 次。
-     */
-    private fun injectAutoPlay(view: WebView) {
-        val js = """
-            (function(){
-              function go(){
-                var v = document.querySelector('video');
-                if(!v) return false;
-                try{ v.muted = false; }catch(e){}
-                try{ var p = v.play(); if(p && p.catch) p.catch(function(){}); }catch(e){}
-                if(!document.fullscreenElement){
-                  try{
-                    var sels = ['.vcp-fullscreen-btn','[class*=fullscreen i]','[class*=full-screen i]',
-                                 '.prism-fullscreen-btn','.vjs-fullscreen-control','[aria-label*=全屏]','[title*=全屏]'];
-                    for(var i=0;i<sels.length;i++){
-                      var b = document.querySelector(sels[i]);
-                      if(b){ b.click(); break; }
-                    }
-                  }catch(e){}
-                  try{ (v.requestFullscreen || v.webkitRequestFullscreen || function(){}).call(v); }catch(e){}
-                }
-                try{
-                  v.style.setProperty('position','fixed','important');
-                  v.style.setProperty('inset','0','important');
-                  v.style.setProperty('width','100vw','important');
-                  v.style.setProperty('height','100vh','important');
-                  v.style.setProperty('z-index','2147483647','important');
-                  v.style.setProperty('background','#000','important');
-                  v.style.setProperty('object-fit','contain','important');
-                }catch(e){}
-                return true;
-              }
-              var n = 0;
-              go();
-              var t = setInterval(function(){ if(go() || ++n > 40) clearInterval(t); }, 1500);
-            })();
-        """.trimIndent()
-        view.evaluateJavascript(js, null)
+        session = s
+        s.open(rt)
+        binding.geckoView.setSession(s)
     }
 
     // ---------- 频道面板 ----------
+
+    private fun setupPanel() {
+        panelAdapter = PlayerChannelAdapter { globalIndex ->
+            hidePanel()
+            playAt(globalIndex)
+        }
+        binding.panelList.layoutManager = LinearLayoutManager(this)
+        binding.panelList.adapter = panelAdapter
+    }
 
     private fun isPanelOpen(): Boolean =
         binding.channelPanel.visibility == View.VISIBLE
 
     private fun showPanel() {
         binding.channelPanel.visibility = View.VISIBLE
-        panelAdapter.selected = index
-        binding.panelList.scrollToPosition(index)
-        // 电视端：把焦点给当前频道行，上下键直接导航
-        binding.panelList.post {
-            binding.panelList.findViewHolderForAdapterPosition(index)
-                ?.itemView?.requestFocus()
+        panelAdapter.selectedIndex = index
+        val pp = panelAdapter.panelPositionOf(index)
+        if (pp != -1) {
+            binding.panelList.scrollToPosition(pp)
+            // 电视端：把焦点给当前频道行，上下键直接导航
+            binding.panelList.post {
+                binding.panelList.findViewHolderForAdapterPosition(pp)
+                    ?.itemView?.requestFocus()
+            }
         }
     }
 
@@ -264,6 +175,89 @@ class PlayerActivity : AppCompatActivity() {
         if (isPanelOpen()) hidePanel() else showPanel()
     }
 
+    // ---------- 手势（手机端） ----------
+    // 点按=面板开关，长按=进设置，上下滑动=切台。
+    // OnTouchListener 返回 false，不吞事件，GeckoView 照常响应触控。
+
+    private fun setupGestures() {
+        gestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                togglePanel()
+                return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                openSettings()
+            }
+
+            override fun onFling(
+                e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float
+            ): Boolean {
+                if (e1 == null) return false
+                val dx = e2.x - e1.x
+                val dy = e2.y - e1.y
+                if (abs(dy) > abs(dx) && abs(dy) > 120 && abs(vy) > 200) {
+                    if (isPanelOpen()) hidePanel()
+                    if (dy < 0) playAt(index + 1) else playAt(index - 1) // 上滑下一个，下滑上一个
+                    return true
+                }
+                return false
+            }
+        })
+        binding.geckoView.setOnTouchListener { _, ev ->
+            gestures.onTouchEvent(ev)
+            false
+        }
+    }
+
+    // ---------- 播放列表 ----------
+
+    private fun loadPlaylist() {
+        if (loading) return
+        loading = true
+        binding.pageLoading.visibility = View.VISIBLE
+        ioScope.launch {
+            val list = try {
+                val url = prefs.playlistUrl
+                val text = if (url.isBlank()) {
+                    assets.open("sample.m3u").bufferedReader().readText()
+                } else {
+                    URL(url).readText()
+                }
+                PlaylistParser.parse(text)
+            } catch (e: Exception) {
+                Log.w(TAG, "load playlist failed", e)
+                emptyList()
+            }
+            withContext(Dispatchers.Main) {
+                loading = false
+                PlaylistHolder.channels = list
+                if (list.isEmpty()) {
+                    binding.pageLoading.visibility = View.GONE
+                    showBanner("播放列表为空，长按屏幕去设置里配置直播源")
+                    return@withContext
+                }
+                panelAdapter.items = PlaylistGrouper.group(list)
+                playAt(prefs.lastIndex.coerceIn(list.indices))
+            }
+        }
+    }
+
+    private fun playAt(i: Int) {
+        val list = PlaylistHolder.channels
+        if (list.isEmpty()) return
+        index = (i + list.size) % list.size
+        val ch = list[index]
+        prefs.lastIndex = index
+        title = ch.name
+        panelAdapter.selectedIndex = index
+        val pp = panelAdapter.panelPositionOf(index)
+        if (pp != -1) binding.panelList.scrollToPosition(pp)
+        showBanner("%03d · %s".format(index + 1, ch.name))
+        binding.pageLoading.visibility = View.VISIBLE
+        session?.loadUri(ch.url)
+    }
+
     private fun showBanner(text: String) {
         binding.channelBanner.text = text
         binding.channelBanner.visibility = View.VISIBLE
@@ -272,9 +266,13 @@ class PlayerActivity : AppCompatActivity() {
         uiHandler.postDelayed(bannerHide!!, 2500)
     }
 
+    private fun openSettings() {
+        startActivity(Intent(this, SettingsActivity::class.java))
+    }
+
     // ---------- 按键 ----------
-    // dispatchKeyEvent 比 onKeyDown 先到：WebView 会吞掉上下键（翻页），
-    // 所以切台逻辑必须在这里拦截，否则焦点在 WebView 上时切不了台。
+    // dispatchKeyEvent 比 onKeyDown 先到：GeckoView 会吞掉上下键，
+    // 所以切台逻辑必须在这里拦截，否则焦点在网页上时切不了台。
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
@@ -285,9 +283,15 @@ class PlayerActivity : AppCompatActivity() {
                         hidePanel()
                         return true
                     }
+                    finish()
+                    return true
                 }
                 KeyEvent.KEYCODE_MENU -> {
-                    togglePanel()
+                    if (panelOpen) {
+                        hidePanel()
+                    } else {
+                        openSettings() // 遥控器菜单键直达设置
+                    }
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
@@ -315,21 +319,6 @@ class PlayerActivity : AppCompatActivity() {
         return super.dispatchKeyEvent(event)
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            // 先退视频全屏，再退页面历史，最后退出
-            if (customView != null) {
-                chromeClient?.onHideCustomView()
-                return true
-            }
-            if (binding.webView.canGoBack()) {
-                binding.webView.goBack()
-                return true
-            }
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
     // ---------- 沉浸式全屏 ----------
 
     private fun hideSystemUi() {
@@ -351,29 +340,32 @@ class PlayerActivity : AppCompatActivity() {
 
     // ---------- 生命周期 ----------
 
-    override fun onPause() {
-        super.onPause()
-        binding.webView.onPause()
-    }
-
     override fun onResume() {
         super.onResume()
-        binding.webView.onResume()
         hideSystemUi()
+        // 从设置页返回时若地址变了（列表被清空）就重载
+        if (PlaylistHolder.channels.isEmpty()) loadPlaylist()
     }
 
     override fun onDestroy() {
         bannerHide?.let { uiHandler.removeCallbacks(it) }
-        binding.webView.apply {
-            stopLoading()
-            loadUrl("about:blank")
-            removeAllViews()
-            destroy()
+        ioScope.cancel()
+        try {
+            session?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "session.close failed", e)
         }
+        session = null
+        try {
+            runtime?.shutdown()
+        } catch (e: Exception) {
+            Log.w(TAG, "runtime.shutdown failed", e)
+        }
+        runtime = null
         super.onDestroy()
     }
 
     companion object {
-        const val EXTRA_INDEX = "index"
+        private const val TAG = "zoe-iptv"
     }
 }

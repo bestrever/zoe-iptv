@@ -1,0 +1,1 @@
+{"browser_specific_settings":{"gecko":{"id":"zoe-autoplay@zoe-iptv"}},"content_scripts":[{"all_frames":false,"js":["autoplay.js"],"matches":["<all_urls>"],"run_at":"document_idle"}],"description":"自动播放页面视频并尝试全屏","manifest_version":2,"name":"zoe-autoplay","version":"1.0"}

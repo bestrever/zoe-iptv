@@ -23,7 +23,7 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.btnSave.setOnClickListener {
             prefs.playlistUrl = binding.playlistUrl.text.toString()
-            PlaylistHolder.channels = emptyList() // 触发 MainActivity 重载
+            PlaylistHolder.channels = emptyList() // 触发 PlayerActivity 重载
             Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
             finish()
         }

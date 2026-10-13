@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 播放页左侧面板的频道行：编号 + 名称，电视端可聚焦 -->
+<!-- 播放页左侧面板的频道行：台标 + 编号 + 名称，电视端可聚焦 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -8,7 +8,15 @@
     android:focusable="true"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:padding="14dp">
+    android:padding="10dp">
+
+    <ImageView
+        android:id="@+id/channelLogo"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginEnd="10dp"
+        android:contentDescription="@string/app_name"
+        android:scaleType="fitCenter" />
 
     <TextView
         android:id="@+id/channelNum"

@@ -6,19 +6,11 @@
     android:background="@android:color/black"
     android:keepScreenOn="true">
 
-    <!-- 网页播放器：系统 WebView（Chromium/Chrome 内核） -->
-    <WebView
-        android:id="@+id/webView"
+    <!-- 网页播放器：火狐 GeckoView 内核（打包进 APK，不依赖系统 WebView） -->
+    <org.mozilla.geckoview.GeckoView
+        android:id="@+id/geckoView"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
-
-    <!-- HTML5 全屏视频的容器（WebChromeClient.onShowCustomView 用） -->
-    <FrameLayout
-        android:id="@+id/customViewContainer"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone"
-        android:background="@android:color/black" />
 
     <!-- 切台时的频道提示条 -->
     <TextView
